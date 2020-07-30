@@ -44,6 +44,8 @@ namespace StarWars
             services.AddSingleton<CharacterRepository>();
             services.AddSingleton<ReviewRepository>();
 
+            services.AddScoped<WebSocketContext>();
+            
             services.AddCors(options =>
             {
                 options.AddPolicy(Cors,
@@ -111,7 +113,19 @@ namespace StarWars
                 .AddType<HumanType>()
                 .AddType<DroidType>()
                 .AddType<EpisodeType>()
-                .Create());
+                .Create(),
+                builder => builder
+                    .Use(next => async context =>
+                    {
+                        var webSocketContext = context.Services.GetService<WebSocketContext>();
+                        if (webSocketContext != null && webSocketContext.User != null)
+                        {
+                            context.ContextData["ClaimsPrincipal"] = webSocketContext.User;
+                        }
+                        await next(context);
+                    })
+                    .UseDefaultPipeline()
+            );
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

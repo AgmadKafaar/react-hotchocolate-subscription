@@ -1,7 +1,7 @@
 import { ApolloClient, ApolloProvider, HttpLink, InMemoryCache, split } from "@apollo/client"
 import { getMainDefinition } from "@apollo/client/utilities"
-import { setContext } from "@apollo/link-context"
-import { WebSocketLink } from "@apollo/link-ws"
+import { setContext } from "@apollo/client/link/context"
+import { WebSocketLink } from "@apollo/client/link/ws"
 import React from "react"
 
 import { useAuth0 } from "./oauth"
@@ -21,7 +21,7 @@ const AuthorizedApolloProvider = ({ children }) => {
       connectionParams: async () => {
         const token = await getTokenSilently()
         if (token) {
-          return { authToken: `${token}` }
+          return { Authorization: `${token}` }
         }
         return {}
       },

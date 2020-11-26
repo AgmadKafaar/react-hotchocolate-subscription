@@ -45,7 +45,7 @@ const StarWars = () => {
 
     useSubscription(SUB_REVIEW, {
         variables: {
-          episode: "NEWHOPE",
+          episode: "NEW_HOPE",
         },
         onSubscriptionData: ({ client, subscriptionData }) => {
           console.log("New created DATA!")
@@ -55,7 +55,7 @@ const StarWars = () => {
 
     const [ createReview] = useMutation(NEW_REVIEW, {
         variables: {
-          episode: "NEWHOPE",
+          episode: "NEW_HOPE",
           review: {
             commentary: "good",
             stars: 5

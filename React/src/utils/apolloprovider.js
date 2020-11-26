@@ -16,8 +16,7 @@ const AuthorizedApolloProvider = ({ children }) => {
   const wsLink = new WebSocketLink({
     uri: "wss://" + process.env.REACT_APP_API_URL,
     options: {
-      reconnect: true,
-      reconnectionAttempts: 2,
+      reconnect: false,
       connectionParams: async () => {
         const token = await getTokenSilently()
         if (token) {

@@ -1,24 +1,18 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using IdentityModel.AspNetCore.OAuth2Introspection;
-using IdentityServer4.AccessTokenValidation;
 using HotChocolate;
 using HotChocolate.AspNetCore;
-using HotChocolate.AspNetCore.Playground;
-using HotChocolate.AspNetCore.Voyager;
-using HotChocolate.Execution;
-using HotChocolate.Execution.Configuration;
 using HotChocolate.Server;
-using HotChocolate.Subscriptions;
 using StarWars.Data;
 using StarWars.Types;
-using System;
+using StarWars.AuthClasses;
 using System.Threading.Tasks;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace StarWars
 {
@@ -44,8 +38,8 @@ namespace StarWars
             services.AddSingleton<CharacterRepository>();
             services.AddSingleton<ReviewRepository>();
 
-            services.AddScoped<WebSocketContext>();
-            
+            services.AddHttpContextAccessor();
+
             services.AddCors(options =>
             {
                 options.AddPolicy(Cors,
@@ -60,72 +54,71 @@ namespace StarWars
             // Custom policy
             services.AddAuthorization();
 
+            services.AddSingleton<ISocketConnectionInterceptor<HttpContext>, AuthenticationSocketConnectionInterceptor>();
+
             services
                 .AddAuthentication(options => {
-                    options.DefaultScheme = IdentityServerAuthenticationDefaults.AuthenticationScheme;
-                    options.DefaultAuthenticateScheme = IdentityServerAuthenticationDefaults.AuthenticationScheme;
+                    options.DefaultScheme = ApiAuthenticationSchemes.DefaultScheme;
+                    options.DefaultAuthenticateScheme = ApiAuthenticationSchemes.DefaultScheme;
                 })
-                .AddJwtBearer("Websockets", ctx => { })
-                .AddIdentityServerAuthentication(IdentityServerAuthenticationDefaults.AuthenticationScheme, options =>
+
+                .AddJwtBearer(ApiAuthenticationSchemes.WebsocketScheme, default)
+
+                .AddJwtBearer(ApiAuthenticationSchemes.DefaultScheme, options =>
                 {
-                    options.ForwardDefaultSelector = context =>
-                    {
-                        if (!context.Items.ContainsKey(AuthenticationSocketInterceptor.HTTP_CONTEXT_WEBSOCKET_AUTH_KEY) && context.Request.Headers.TryGetValue("Upgrade", out var value) && value.Count > 0 && value[0] is string stringValue &&  stringValue == "websocket")
-                            {
-                                return "Websockets";
-                            }
-                        return IdentityServerAuthenticationDefaults.AuthenticationScheme;
-                    };
-                    options.TokenRetriever = new Func<HttpRequest, string>(req =>
-                    {
-                        if (req.HttpContext.Items.TryGetValue(AuthenticationSocketInterceptor.HTTP_CONTEXT_WEBSOCKET_AUTH_KEY, out object token) && token is string stringToken)
-                        {
-                            return stringToken;
-                        }
-
-                        var fromHeader = TokenRetrieval.FromAuthorizationHeader();
-                        var fromQuery = TokenRetrieval.FromQueryString();  // Query string auth
-                        string tokenHttp = fromHeader(req) ?? fromQuery(req);
-                        return tokenHttp;
-                    });
-
                     options.Authority = _config.Authentication.Authority;
-                    options.ApiName = _config.Authentication.ApiName;
-                    options.RequireHttpsMetadata = false;
+                    options.Audience = _config.Authentication.Audience;
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidTypes = new[] { "at+jwt" }
+                    };
+
+                    options.ForwardDefaultSelector = ApiAuthenticationSchemes.ForwardWebsocket();
+
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = (context) =>
+                        {
+                            context.Token = ApiAuthenticationSchemes.TokenRetriever()(context.Request);
+                            return Task.CompletedTask;
+                        }
+                    };
+                })
+                .AddOAuth2Introspection(ApiAuthenticationSchemes.IntrospectionScheme, options =>
+                {
+                    options.Authority = "https://ids-nhi-test.azurewebsites.net";
+                    options.TokenRetriever = ApiAuthenticationSchemes.TokenRetriever();
+
+                    options.ClientId = "";
+
+                    options.ClientSecret = "";
                 });
 
-            services.AddSingleton<ISocketConnectionInterceptor<HttpContext>, AuthenticationSocketInterceptor>();
-
-            // Add in-memory event provider
-            services.AddInMemorySubscriptionProvider();
-
             // Add GraphQL Services
-            services.AddGraphQL(sp => SchemaBuilder.New()
-                .AddServices(sp)
-
-                // Adds the authorize directive and
-                // enable the authorization middleware.
-                .AddAuthorizeDirectiveType()
-
+            services
+                .AddGraphQLServer()
+                
+                .AddAuthorization()
+                
                 .AddQueryType<QueryType>()
                 .AddMutationType<MutationType>()
                 .AddSubscriptionType<SubscriptionType>()
+
                 .AddType<HumanType>()
                 .AddType<DroidType>()
                 .AddType<EpisodeType>()
-                .Create(),
-                builder => builder
-                    .Use(next => async context =>
-                    {
-                        var webSocketContext = context.Services.GetService<WebSocketContext>();
-                        if (webSocketContext != null && webSocketContext.User != null)
-                        {
-                            context.ContextData["ClaimsPrincipal"] = webSocketContext.User;
-                        }
-                        await next(context);
-                    })
-                    .UseDefaultPipeline()
-            );
+
+                .AddInMemorySubscriptions()
+
+                .UseField(next => async context =>
+                {
+                    var hca = context.Services.GetRequiredService<IHttpContextAccessor>();
+
+                    context.ContextData["ClaimsPrincipal"] = hca.HttpContext.User;
+
+                    await next(context);
+                });
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -137,16 +130,18 @@ namespace StarWars
             }
 
             app.UseCors(Cors);
-            app.UseAuthentication();
-            app.UseAuthorization();
 
             app.UseRouting();
 
-            app
-                .UseWebSockets()
-                .UseGraphQL()
-                .UsePlayground()
-                .UseVoyager();
+            app.UseAuthentication();
+
+            app.UseAuthorization();
+
+            app.UseWebSockets();
+
+            app.UsePlayground();
+
+            app.UseEndpoints(endpoints => endpoints.MapGraphQL());
         }
     }
 }

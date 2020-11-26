@@ -1,10 +1,13 @@
 using System.Collections.Generic;
+using HotChocolate.AspNetCore.Authorization;
+
 
 namespace StarWars.Models
 {
     /// <summary>
     /// A droid in the Star Wars universe.
     /// </summary>
+    [Authorize]
     public class Droid
        : ICharacter
     {

@@ -1,24 +1,16 @@
-﻿using System;
-using HotChocolate.Subscriptions;
-using StarWars.Data;
+﻿using HotChocolate;
+using HotChocolate.Types;
 using StarWars.Models;
 
 namespace StarWars
 {
+
     public class Subscription
     {
-        private readonly ReviewRepository _repository;
-
-        public Subscription(ReviewRepository repository)
-        {
-            _repository = repository
-                ?? throw new ArgumentNullException(nameof(repository));
-        }
-
-        public Review OnReview(Episode episode, IEventMessage message)
-        {
-            System.Console.WriteLine("OnReview");
-            return (Review)message.Payload;
-        }
+        [Subscribe]
+        public Review OnReview(
+            [Topic]Episode episode, 
+            [EventMessage]Review message) =>
+            message;
     }
 }

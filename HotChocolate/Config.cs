@@ -18,6 +18,7 @@ namespace StarWars
         public string ApiName { get; set; }
         public string Authority { get; set; }
         public string AuthorizationUrl { get; set; }
+        public string Audience { get; set; }
     }
 
 

@@ -5,58 +5,60 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using StarWars.AuthClasses;
 
 namespace StarWars
 {
-    public class AuthenticationSocketInterceptor : ISocketConnectionInterceptor<HttpContext>
+    public class AuthenticationSocketConnectionInterceptor : ISocketConnectionInterceptor<HttpContext>
     {
-        // This is the key to the auth token in the HTTP Context
-        public static readonly string HTTP_CONTEXT_WEBSOCKET_AUTH_KEY = "websocket-auth-token";
-        // This is the key that apollo uses in the connection init request
-        public static readonly string WEBOCKET_PAYLOAD_AUTH_KEY = "Authorization";
+        private readonly IAuthenticationSchemeProvider _schemeProvider;
 
-        private readonly IAuthenticationSchemeProvider _schemes;
-        public AuthenticationSocketInterceptor(IAuthenticationSchemeProvider schemes)
+        public AuthenticationSocketConnectionInterceptor(IAuthenticationSchemeProvider schemeProvider)
         {
-            _schemes = schemes;
+            _schemeProvider = schemeProvider;
         }
+
         public async Task<ConnectionStatus> OnOpenAsync(
             HttpContext context,
             IReadOnlyDictionary<string, object> properties,
             CancellationToken cancellationToken)
         {
-            if (properties.TryGetValue(WEBOCKET_PAYLOAD_AUTH_KEY, out object token) &&
-                token is string stringToken)
+            if (properties.TryGetValue(AccessToken.PayloadKey, out var token) && token is string)
             {
-                context.Items[HTTP_CONTEXT_WEBSOCKET_AUTH_KEY] = stringToken;
+                context.Items[AccessToken.ContextKey] = token;
+
                 context.Features.Set<IAuthenticationFeature>(new AuthenticationFeature
                 {
                     OriginalPath = context.Request.Path,
                     OriginalPathBase = context.Request.PathBase
                 });
+
                 // Give any IAuthenticationRequestHandler schemes a chance to handle the request
+
                 var handlers = context.RequestServices.GetRequiredService<IAuthenticationHandlerProvider>();
-                foreach (var scheme in await _schemes.GetRequestHandlerSchemesAsync())
+
+                foreach (var scheme in await _schemeProvider.GetRequestHandlerSchemesAsync())
                 {
                     var handler = handlers.GetHandlerAsync(context, scheme.Name) as IAuthenticationRequestHandler;
-                    if (handler != null && await handler.HandleRequestAsync())
-                    {
+
+                    if (await handler?.HandleRequestAsync())
                         return ConnectionStatus.Reject();
-                    }
                 }
-                var defaultAuthenticate = await _schemes.GetDefaultAuthenticateSchemeAsync();
-                if (defaultAuthenticate != null)
+
+                var defaultScheme = await _schemeProvider.GetDefaultAuthenticateSchemeAsync();
+
+                if (defaultScheme != null)
                 {
-                    var result = await context.AuthenticateAsync(defaultAuthenticate.Name);
+                    var result = await context.AuthenticateAsync(defaultScheme.Name);
+
                     if (result?.Principal != null)
                     {
-                        var webSocketContext = context.RequestServices.GetService<WebSocketContext>();
-                        webSocketContext.User = result.Principal;
                         context.User = result.Principal;
                         return ConnectionStatus.Accept();
                     }
                 }
             }
+
             return ConnectionStatus.Reject();
         }
     }
